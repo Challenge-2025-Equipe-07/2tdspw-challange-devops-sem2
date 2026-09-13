@@ -10,7 +10,9 @@
 -- para correção (estrutura + comentários).
 --
 -- Homologação do CRUD: TB_TUTOR (pai) e TB_PET (filho, FK TB_TUTOR_ID_TUTOR).
--- Identificadores entre aspas para preservar maiúsculas no PostgreSQL.
+-- Identificadores quoted neste arquivo são o modelo lógico.
+-- No Azure, Hibernate (ddl-auto=update) cria tabelas minúsculas (tb_tutor, tb_pet).
+-- No Beekeeper use: SELECT * FROM tb_tutor; (sem aspas).
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------

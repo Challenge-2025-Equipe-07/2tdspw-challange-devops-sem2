@@ -134,15 +134,15 @@ az webapp log tail -g rg-challenge-devops -n app-ccgl-rm564113
 
 Confere Web App `Running`, PostgreSQL `Ready` e `GET /veti/tutores` em JSON. Se a página for *Hey, Java developers!*, o JAR ainda não subiu.
 
-### 5.4 CRUD na nuvem (Tutor + Pet)
+### 5.4 CRUD na nuvem
 
-`GET` é público. `POST` / `PUT` / `DELETE` exigem JWT. O login devolve o token em texto (`eyJ...`), não `{"token":"..."}`.
+`GET` é público. `POST` / `PUT` / `DELETE` exigem JWT.
 
 ```bash
 ./azure_test_crud.sh
 ```
 
-O script **não dispara** o CRUD: imprime curls prontos para copiar e colar (URL completa, sem variáveis). Depois do login, substitua `COLE_O_JWT_AQUI` pelo JWT. Se o POST não devolver id `1`/`2`, ajuste o número no `curl`.
+O script **executa** o CRUD via HTTP (2 tutores, 2 pets, 2 veterinários, 2 consultas — altera e apaga uma) e no final só faz **SELECT** no Postgres para provar que os curls gravaram.
 
 ### 5.5 Persistência no banco (vídeo)
 
@@ -152,10 +152,23 @@ az postgres flexible-server execute \
   --admin-user ccgl \
   --admin-password "$PG_ADMIN_PASSWORD" \
   --database-name db-challenge \
-  --querytext 'SELECT * FROM "TB_TUTOR" LIMIT 10; SELECT * FROM "TB_PET" LIMIT 10;'
+  --querytext 'SELECT * FROM tb_tutor LIMIT 10; SELECT * FROM tb_pet LIMIT 10;'
 ```
 
-As aspas em `"TB_TUTOR"` / `"TB_PET"` são obrigatórias (Hibernate criou os nomes em maiúsculas). Cliente gráfico (DBeaver): host `pg-ccgl-rm564113.postgres.database.azure.com`, porta `5432`, database `db-challenge`, user `ccgl`, SSL `require`.
+Hibernate no PostgreSQL cria tabelas **minúsculas** (`tb_tutor`, `tb_pet`). `"TB_TUTOR"` entre aspas não existe. Beekeeper: `SELECT * FROM tb_tutor;`.
+
+**Beekeeper Studio — Import from URL:** cole só a URI `postgres://...` impressa no final do `azure_create_infra.sh` (não a linha JDBC). Depois do import, em SSL escolha **Trust the server**. Azure exige TLS; o import liga SSL mas deixa a verificação de certificado ligada, e a conexão cai.
+
+Se o import falhar, preencha na mão:
+
+| Campo | Valor |
+|---|---|
+| Connection type | PostgreSQL |
+| Host | `pg-ccgl-rm564113.postgres.database.azure.com` |
+| Port | `5432` |
+| User | `ccgl` |
+| Default database | `db-challenge` |
+| SSL | Enable SSL → **Trust the server** |
 
 ### 5.6 Limpeza
 
@@ -175,7 +188,7 @@ Comandos `az` avulsos: [`guia_deploy_azure.md`](guia_deploy_azure.md).
 |---|---|
 | `azure_create_infra.sh` | Cria a PaaS, clona a API, build e deploy do JAR |
 | `azure_test_infra.sh` | Web App + PostgreSQL + `GET /veti/tutores` |
-| `azure_test_crud.sh` | Imprime curls de JWT + CRUD Tutor/Pet para copiar e colar |
+| `azure_test_crud.sh` | Executa CRUD HTTP (Tutor/Pet/Consulta/Veterinário) e SELECT de conferência |
 | `azure_delete_infra.sh` | Resource Group + purge do Key Vault |
 | `script_bd.sql` | DDL PostgreSQL (tabelas, colunas, PK/FK, comentários) |
 | `guia_deploy_azure.md` | Referência dos comandos `az` |
