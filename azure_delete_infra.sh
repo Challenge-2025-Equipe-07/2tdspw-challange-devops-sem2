@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Deletar toda a infraestrutura — Opção B (App Service + Azure SQL PaaS)
+# Deletar toda a infraestrutura — Opção B (App Service + PostgreSQL PaaS)
 # Time CCGL · RM564113
 # =============================================================================
 set -euo pipefail
 
 RM_ID="rm564113"
+LOCATION="chilecentral"
 RG="rg-challenge-devops"
-SQL_SERVER_NAME="sql-ccgl-${RM_ID}"
 KEYVAULT_NAME="kv-ccgl-${RM_ID}"
 
 echo "============================================="
@@ -18,7 +18,7 @@ echo ""
 echo " Isso vai remover:"
 echo "   - Web App (App Service)"
 echo "   - App Service Plan"
-echo "   - Azure SQL Server + Database"
+echo "   - Azure Database for PostgreSQL Flexible Server"
 echo "   - Key Vault"
 echo "   - Todos os recursos do grupo"
 echo ""
@@ -33,16 +33,20 @@ case "$CONFIRM" in
 esac
 
 # ---------------------------------------------------------------------------
-# 1. Deletar Resource Group (remove tudo de uma vez)
+# 1. Purge do Key Vault ANTES do RG (senão o nome fica preso em soft-delete)
+# ---------------------------------------------------------------------------
+echo "==> Removendo Key Vault: $KEYVAULT_NAME"
+if az keyvault show --name "$KEYVAULT_NAME" --resource-group "$RG" >/dev/null 2>&1; then
+  az keyvault delete --name "$KEYVAULT_NAME" --resource-group "$RG" >/dev/null || true
+fi
+echo "==> Purgando Key Vault (libera o nome para o próximo create)"
+az keyvault purge --name "$KEYVAULT_NAME" --location "$LOCATION" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# 2. Deletar Resource Group (remove o restante)
 # ---------------------------------------------------------------------------
 echo "==> Deletando Resource Group: $RG"
 az group delete --name "$RG" --yes --no-wait
-
-# ---------------------------------------------------------------------------
-# 2. Purge do Key Vault (soft-delete fica 90 dias por padrão)
-# ---------------------------------------------------------------------------
-echo "==> Purgando Key Vault (soft-delete): $KEYVAULT_NAME"
-az keyvault purge --name "$KEYVAULT_NAME" 2>/dev/null || true
 
 echo ""
 echo "============================================="

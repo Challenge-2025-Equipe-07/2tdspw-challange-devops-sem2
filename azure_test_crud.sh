@@ -1,108 +1,49 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CRUD na nuvem — Tutor + Pet (tabelas relacionadas) · Opção B
+# CRUD na nuvem — curls prontos para copiar e colar (Tutor + Pet)
 # Time CCGL · RM564113
 # =============================================================================
-set -euo pipefail
+# Depois do login, substitua COLE_O_JWT_AQUI pelo token (eyJ...) em todos
+# os POST/PUT/DELETE. IDs 1 e 2 assumem o primeiro tutor/pet criados nesta
+# sessão — ajuste o número no URL/JSON se o POST devolver outro "id".
+# =============================================================================
 
-RM_ID="rm564113"
-WEBAPP_NAME="app-ccgl-${RM_ID}"
-SQL_SERVER_NAME="sql-ccgl-${RM_ID}"
-SQL_DB_NAME="db-challenge"
-SQL_ADMIN_USER="sqladmin"
-SQL_ADMIN_PASSWORD="${SQL_ADMIN_PASSWORD:-}"
-
-BASE="${BASE_URL:-https://${WEBAPP_NAME}.azurewebsites.net/veti}"
-AUTH_EMAIL="${AUTH_EMAIL:-vet@ccgl.com}"
-AUTH_PASSWORD="${AUTH_PASSWORD:-SenhaForte!123}"
 UNIQ="$(date +%s)"
 CPF1="1$(printf '%010d' $((UNIQ % 10000000000)))"
 CPF2="2$(printf '%010d' $((UNIQ % 10000000000)))"
 
-json_get() {
-  python3 -c 'import json,sys; print(json.load(sys.stdin)'"$1"')'
-}
+cat <<EOF
+# GET tutores (público)
+curl -s https://app-ccgl-rm564113.azurewebsites.net/veti/tutores
 
-echo "============================================="
-echo " CRUD Veti — ${BASE}"
-echo "============================================="
+# Registrar ADMIN (200 = novo · 400 = e-mail já existe)
+curl -s -X POST https://app-ccgl-rm564113.azurewebsites.net/veti/auth/register -H "Content-Type: application/json" -d '{"email":"vet@ccgl.com","password":"SenhaForte!123","role":"ADMIN"}'
 
-echo "==> [1/8] Health"
-curl -sf "${BASE}/health"
-echo
+# Login — copie o JWT da resposta (texto eyJ..., sem aspas)
+curl -s -X POST https://app-ccgl-rm564113.azurewebsites.net/veti/auth/login -H "Content-Type: application/json" -d '{"email":"vet@ccgl.com","password":"SenhaForte!123"}'
 
-echo "==> [2/8] Register veterinário ADMIN"
-set +e
-REG_CODE="$(curl -s -o /tmp/veti-register.body -w "%{http_code}" \
-  -X POST "${BASE}/auth/register" \
-  -H "Content-Type: application/json" \
-  -d "{\"email\":\"${AUTH_EMAIL}\",\"password\":\"${AUTH_PASSWORD}\",\"role\":\"ADMIN\"}")"
-set -e
-echo "   HTTP ${REG_CODE} (200 novo / 400 já existe)"
+# Criar tutor 1
+curl -s -X POST https://app-ccgl-rm564113.azurewebsites.net/veti/tutores -H "Authorization: Bearer COLE_O_JWT_AQUI" -H "Content-Type: application/json" -d '{"name":"Ana Silva","email":"ana${UNIQ}@ccgl.com","phone":"11999999999","cpf":"${CPF1}"}'
 
-echo "==> [3/8] Login"
-LOGIN_BODY="$(curl -sf -X POST "${BASE}/auth/login" \
-  -H "Content-Type: application/json" \
-  -d "{\"email\":\"${AUTH_EMAIL}\",\"password\":\"${AUTH_PASSWORD}\"}")"
-TOKEN="$(printf '%s' "$LOGIN_BODY" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v["token"] if isinstance(v, dict) else v)')"
-if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
-  echo "❌ Falha no login. Corpo: ${LOGIN_BODY}" >&2
-  exit 1
-fi
-echo "   Token obtido ✅"
-AUTH=( -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" )
+# Criar tutor 2
+curl -s -X POST https://app-ccgl-rm564113.azurewebsites.net/veti/tutores -H "Authorization: Bearer COLE_O_JWT_AQUI" -H "Content-Type: application/json" -d '{"name":"Bruno Souza","email":"bruno${UNIQ}@ccgl.com","phone":"11888888888","cpf":"${CPF2}"}'
 
-echo "==> [4/8] Criar 2 tutores"
-TUTOR1="$(curl -sf -X POST "${BASE}/tutores" "${AUTH[@]}" \
-  -d "{\"name\":\"Ana Silva\",\"email\":\"ana${UNIQ}@ccgl.com\",\"phone\":\"11999999999\",\"cpf\":\"${CPF1}\"}")"
-TUTOR2="$(curl -sf -X POST "${BASE}/tutores" "${AUTH[@]}" \
-  -d "{\"name\":\"Bruno Souza\",\"email\":\"bruno${UNIQ}@ccgl.com\",\"phone\":\"11888888888\",\"cpf\":\"${CPF2}\"}")"
-ID1="$(printf '%s' "$TUTOR1" | json_get '["id"]')"
-ID2="$(printf '%s' "$TUTOR2" | json_get '["id"]')"
-echo "   Tutor 1 id=${ID1}  Tutor 2 id=${ID2}"
+# Criar pet 1 (idTutor = id do tutor 1)
+curl -s -X POST https://app-ccgl-rm564113.azurewebsites.net/veti/pets -H "Authorization: Bearer COLE_O_JWT_AQUI" -H "Content-Type: application/json" -d '{"name":"Rex","raca":"LABRADOR_RETRIEVER","peso":28.5,"idade":4,"castrado":true,"idTutor":1}'
 
-echo "==> [5/8] Criar 2 pets (FK Tutor)"
-PET1="$(curl -sf -X POST "${BASE}/pets" "${AUTH[@]}" \
-  -d "{\"name\":\"Rex\",\"raca\":\"LABRADOR_RETRIEVER\",\"peso\":28.5,\"idade\":4,\"castrado\":true,\"idTutor\":${ID1}}")"
-PET2="$(curl -sf -X POST "${BASE}/pets" "${AUTH[@]}" \
-  -d "{\"name\":\"Mimi\",\"raca\":\"PERSIAN\",\"peso\":4.2,\"idade\":2,\"castrado\":false,\"idTutor\":${ID2}}")"
-PET_ID1="$(printf '%s' "$PET1" | json_get '["id"]')"
-PET_ID2="$(printf '%s' "$PET2" | json_get '["id"]')"
-echo "   Pet 1 id=${PET_ID1}  Pet 2 id=${PET_ID2}"
+# Criar pet 2 (idTutor = id do tutor 2)
+curl -s -X POST https://app-ccgl-rm564113.azurewebsites.net/veti/pets -H "Authorization: Bearer COLE_O_JWT_AQUI" -H "Content-Type: application/json" -d '{"name":"Mimi","raca":"PERSIAN","peso":4.2,"idade":2,"castrado":false,"idTutor":2}'
 
-echo "==> [6/8] Consultar (GET)"
-curl -sf "${BASE}/tutores?size=10"
-echo
-curl -sf "${BASE}/pets?size=10"
-echo
+# Consultar
+curl -s https://app-ccgl-rm564113.azurewebsites.net/veti/tutores?size=10
+curl -s https://app-ccgl-rm564113.azurewebsites.net/veti/pets?size=10
 
-echo "==> [7/8] Alterar tutor 1 + excluir pet 2"
-curl -sf -X PUT "${BASE}/tutores/${ID1}" "${AUTH[@]}" \
-  -d "{\"name\":\"Ana Silva Costa\",\"email\":\"ana${UNIQ}@ccgl.com\",\"phone\":\"11777777777\",\"cpf\":\"${CPF1}\"}"
-echo
-DEL_CODE="$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "${BASE}/pets/${PET_ID2}" \
-  -H "Authorization: Bearer ${TOKEN}")"
-echo "   DELETE /pets/${PET_ID2} HTTP ${DEL_CODE}"
+# Alterar tutor 1
+curl -s -X PUT https://app-ccgl-rm564113.azurewebsites.net/veti/tutores/1 -H "Authorization: Bearer COLE_O_JWT_AQUI" -H "Content-Type: application/json" -d '{"name":"Ana Silva Costa","email":"ana${UNIQ}@ccgl.com","phone":"11777777777","cpf":"${CPF1}"}'
 
-echo "==> [8/8] SELECT no Azure SQL (persistência)"
-if [[ -z "$SQL_ADMIN_PASSWORD" ]]; then
-  echo "   SQL_ADMIN_PASSWORD não definido — pule o SELECT ou exporte a senha."
-  echo "   sqlcmd -S ${SQL_SERVER_NAME}.database.windows.net -d ${SQL_DB_NAME} \\"
-  echo "     -U ${SQL_ADMIN_USER} -P '***' -N -C \\"
-  echo "     -Q \"SELECT TOP 10 * FROM TB_TUTOR; SELECT TOP 10 * FROM TB_PET;\""
-elif command -v sqlcmd >/dev/null 2>&1; then
-  sqlcmd -S "${SQL_SERVER_NAME}.database.windows.net" -d "$SQL_DB_NAME" \
-    -U "$SQL_ADMIN_USER" -P "$SQL_ADMIN_PASSWORD" -N -C \
-    -Q "SELECT TOP 10 ID_TUTOR, NM_TUTOR, DS_EMAIL FROM TB_TUTOR; SELECT TOP 10 ID_PET, NM_PET, TB_TUTOR_ID_TUTOR FROM TB_PET;"
-else
-  echo "   sqlcmd não encontrado. Instale o mssql-tools ou rode no Query Editor do Portal:"
-  echo "   SELECT TOP 10 * FROM TB_TUTOR;"
-  echo "   SELECT TOP 10 * FROM TB_PET;"
-fi
+# Excluir pet 2
+curl -s -X DELETE https://app-ccgl-rm564113.azurewebsites.net/veti/pets/2 -H "Authorization: Bearer COLE_O_JWT_AQUI"
 
-echo ""
-echo "============================================="
-echo " ✅ CRUD concluído (Tutor + Pet, ≥ 2 linhas)"
-echo "============================================="
-echo " Swagger: ${BASE}/swagger-ui.html"
-echo "============================================="
+# Persistência (PostgreSQL) — troque a senha
+az postgres flexible-server execute --name pg-ccgl-rm564113 --admin-user ccgl --admin-password 'SuaSenhaForte!123' --database-name db-challenge --querytext 'SELECT * FROM "TB_TUTOR" LIMIT 10; SELECT * FROM "TB_PET" LIMIT 10;'
+EOF

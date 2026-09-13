@@ -2,7 +2,9 @@
 
 **Time CCGL** · Turma **2TDSPW** · Região Azure: **chilecentral**
 
-API Spring Boot hospedada na Azure (**Opção B — PaaS**): **App Service (Web App)** + **Azure SQL Database**, provisionados exclusivamente via **Azure CLI**.
+Repositório de **infraestrutura e deploy** da API **Veti** (Spring Boot / Java 21) na Azure.
+
+**Opção B — PaaS (sem containers):** [Azure App Service](https://learn.microsoft.com/azure/app-service/) (Web App) + [Azure Database for PostgreSQL Flexible Server](https://learn.microsoft.com/azure/postgresql/). Todos os recursos são criados por **Azure CLI** (`azure_*.sh`). Não misturar com ACR/ACI.
 
 ---
 
@@ -10,110 +12,94 @@ API Spring Boot hospedada na Azure (**Opção B — PaaS**): **App Service (Web 
 
 | RM | Nome | Turma |
 |---|---|---|
-| 564113 | *(preencher nome completo)* | 2TDSPW |
-| — | *(preencher)* | 2TDSPW |
-| — | *(preencher)* | 2TDSPW |
-| — | *(preencher)* | 2TDSPW |
-
-> Substitua os placeholders pelos nomes oficiais da equipe antes da entrega.
+| 564113 | Camilo Micheletto da Silva | 2TDSPW |
+| 564982 | Carlos André Silva | 2TDSPW |
+| 562700 | Guilherme Ribeiro da Costa | 2TDSPW |
+| 566376 | Laura Lopes Cruz | 2TDSPW |
 
 ---
 
-## 1. Descrição da solução
+## 1. O que a solução faz
 
-A solução entrega uma **API REST Java (Spring Boot)** na nuvem Azure, com persistência em **Azure SQL Database (PaaS)** e exposição via **Azure App Service**.
+**Veti** é uma API REST de clínica veterinária. Na nuvem ela persiste cadastros reais e expõe CRUD HTTP autenticado.
 
-Na prática, o sistema permite:
+Este repositório **não** é o código-fonte da API. Ele provisiona o ambiente Azure, clona [challenge-2026-java-spint1](https://github.com/Challenge-2025-Equipe-07/challenge-2026-java-spint1), gera o JAR e publica no App Service.
 
-- **CRUD completo** (inclusão, alteração, exclusão e consulta) sobre **pelo menos duas tabelas relacionadas**
-- Persistência real de dados na nuvem (não apenas em localhost)
-- Autenticação via JWT (segredo armazenado no **Azure Key Vault** e injetado como App Setting)
-- Validação rápida da infraestrutura (health check e status dos recursos) pelos scripts deste repositório
+Na prática:
 
-Este repositório concentra a **infraestrutura como scripts** (create / test / delete) e o **passo a passo de deploy e homologação** exigidos pelo Challenge.
+- **CRUD completo** (inclusão, alteração, exclusão e consulta) em **duas tabelas relacionadas:** `TB_TUTOR` e `TB_PET` (pet aponta para tutor)
+- Pelo menos **2 linhas reais** em cada fluxo de homologação
+- Persistência no PostgreSQL PaaS (não em localhost)
+- Autenticação JWT (`POST /veti/auth/login` devolve o token em texto)
+- Scripts de create / test / CRUD / delete para o vídeo e a correção
+- DDL documentado em [`script_bd.sql`](script_bd.sql) (tabelas, colunas, PKs, FKs e `COMMENT ON`)
+
+**Aplicação:** https://app-ccgl-rm564113.azurewebsites.net  
+**API (context-path `/veti`):** https://app-ccgl-rm564113.azurewebsites.net/veti  
+**Swagger:** https://app-ccgl-rm564113.azurewebsites.net/veti/swagger-ui.html
+
+A Veti **não** tem endpoint `/health`. O probe usado nos testes é `GET /veti/tutores` (público, JSON).
 
 ---
 
 ## 2. Benefícios para o negócio
 
-| Benefício | Impacto prático |
+| Benefício | Impacto |
 |---|---|
-| **Disponibilidade na nuvem** | A API fica acessível 24/7 via HTTPS, sem depender de máquina local |
-| **Banco gerenciado (PaaS)** | Backup, patch e alta disponibilidade tratados pelo Azure SQL — menos operação manual |
-| **Segurança de credenciais** | Senhas e JWT ficam no Key Vault / App Settings, fora do código-fonte |
-| **Provisionamento repetível** | Scripts Azure CLI reduzem erro humano e permitem recriar o ambiente em minutos |
-| **Custo controlado** | Camada SQL Basic + App Service Plan B1 — custo estimado ~US$ 18/mês |
-| **Rastreabilidade acadêmica** | Clone → scripts → deploy → CRUD + SELECT no banco, alinhado ao vídeo demonstrativo |
+| **Clínica acessível na nuvem** | Tutores e pets ficam disponíveis via HTTPS, sem depender do notebook do aluno |
+| **Banco gerenciado (PaaS)** | Patch, backup e SSL ficam a cargo do Azure Database for PostgreSQL |
+| **Credenciais fora do Git** | Senha JDBC e JWT vão para Key Vault e App Settings — não no código |
+| **Ambiente repetível** | Um script recria Resource Group, banco, app e deploy em minutos |
+| **Custo de laboratório** | PostgreSQL Burstable `Standard_B1ms` + App Service Plan **B1** Linux |
+| **Evidência de persistência** | CRUD na API + `SELECT` em `TB_TUTOR` / `TB_PET` no servidor Azure |
 
 ---
 
-## 3. Arquitetura (Opção B — App Service + Azure SQL)
+## 3. Arquitetura
 
-> **Regra do Challenge:** não misturar com containers (ACR/ACI). App e banco são **somente PaaS**.
+A API já usa o driver PostgreSQL e as variáveis `DB_URL`, `DB_USER` e `DB_PASSWORD` (as mesmas do `docker-compose` local). Na Azure o motor é o **Flexible Server**, não um container. O JAR sobe no App Service Linux (Java 21). `SPRING_JPA_HIBERNATE_DDL_AUTO=update` no App Service evita o `create-drop` do `application.properties` local.
 
-### Diagrama de arquitetura
+![Arquitetura Opção B — Cliente, App Service Plan, Web App Java 21, Key Vault e Azure Database for PostgreSQL](DevOps2026Sprint3.jpg)
 
-```mermaid
-flowchart LR
-  subgraph Cliente
-    U[Usuário / Postman / Frontend]
-  end
+### Fluxo
 
-  subgraph Azure["Resource Group: rg-challenge-devops"]
-    WA["App Service<br/>app-ccgl-rm564113<br/>Java 21 · Spring Boot"]
-    SQL["Azure SQL Server<br/>sql-ccgl-rm564113"]
-    DB[("Database<br/>db-challenge")]
-    KV["Key Vault<br/>kv-ccgl-rm564113"]
-    PLAN["App Service Plan<br/>plan-ccgl-rm564113 · B1 Linux"]
-  end
+1. `./azure_create_infra.sh` — login, providers, Resource Group, PostgreSQL + database + firewall, Key Vault, App Service Plan, Web App, App Settings.
+2. O mesmo script clona a API, seleciona **Java 21**, roda `./mvnw package` e faz `az webapp deploy --type jar`.
+3. Requisições HTTPS chegam ao Web App; a API grava no PostgreSQL (`sslmode=require`).
+4. Homologação: `./azure_test_infra.sh` → curls de `./azure_test_crud.sh` → `SELECT` nas tabelas.
 
-  U -->|HTTPS CRUD /veti| WA
-  PLAN --> WA
-  WA -->|JDBC + firewall Azure| SQL
-  SQL --> DB
-  KV -.->|segredos / referência| WA
-```
+O Key Vault **guarda** JDBC, usuário, senha e JWT. Em runtime a Web App lê **App Settings** (cópia feita no create), não Key Vault References.
 
-### Fluxo técnico
-
-1. O operador faz login no Azure e executa `azure_create_infra.sh`.
-2. O script cria Resource Group, SQL Server + Database, regras de firewall, Key Vault, App Service Plan e Web App.
-3. Credenciais e connection string são gravadas no Key Vault e injetadas como **App Settings** do Web App.
-4. O JAR Spring Boot é publicado no App Service (`az webapp deploy --type jar`).
-5. Requisições HTTPS chegam ao Web App; a API persiste dados no Azure SQL.
-6. Homologação: `GET /veti/health` + CRUD em Tutor/Pet + `SELECT` no Azure SQL (`sqlcmd`).
-
-### Recursos Azure
+### Recursos
 
 | Recurso | Nome | Função |
 |---|---|---|
-| Resource Group | `rg-challenge-devops` | Agrupa e facilita exclusão total |
-| Azure SQL Server | `sql-ccgl-rm564113` | Servidor lógico PaaS |
-| Azure SQL Database | `db-challenge` | Banco relacional (Basic) |
-| Key Vault | `kv-ccgl-rm564113` | Segredos (JDBC, usuário, senha, JWT) |
+| Resource Group | `rg-challenge-devops` | Agrupa e apaga tudo de uma vez |
+| PostgreSQL Flexible Server | `pg-ccgl-rm564113` | PaaS Burstable `Standard_B1ms` (menor SKU do Flexible Server) |
+| Database | `db-challenge` | Banco da Veti |
+| Key Vault | `kv-ccgl-rm564113` | Segredos do setup |
 | App Service Plan | `plan-ccgl-rm564113` | Hospedagem B1 Linux |
-| Web App | `app-ccgl-rm564113` | Runtime Java 21 + JAR Spring Boot |
+| Web App | `app-ccgl-rm564113` | Runtime Java 21 + JAR |
 
-**URL da aplicação:** `https://app-ccgl-rm564113.azurewebsites.net`  
-**API (context-path):** `https://app-ccgl-rm564113.azurewebsites.net/veti`  
-**Código da API:** [challenge-2026-java-spint1](https://github.com/Challenge-2025-Equipe-07/challenge-2026-java-spint1) (perfil Spring `azure` + driver `mssql-jdbc`)
+Admin do Postgres: usuário `ccgl`. Host: `pg-ccgl-rm564113.postgres.database.azure.com:5432`.
 
 ---
 
 ## 4. Pré-requisitos
 
 - Conta Azure com assinatura ativa
-- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) (`az --version`)
-- Java 21 + Maven Wrapper do projeto da aplicação (`./mvnw`)
-- `curl` e `python3` (scripts de teste)
-- `sqlcmd` (opcional, para o `SELECT` de persistência no vídeo)
-- Repositório da API [challenge-2026-java-spint1](https://github.com/Challenge-2025-Equipe-07/challenge-2026-java-spint1) com as alterações Azure (driver SQL Server + perfil `azure`)
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) (`az login` já feito ou o script pede)
+- **Java 21** no PATH ou detectável (`/usr/libexec/java_home -v 21` no macOS) — o create seleciona sozinho
+- `git`, `curl`, `python3`
+- Senha do admin Postgres (exportar ou digitar quando o script pedir)
 
 ---
 
-## 5. How-To — Deploy e teste (passo a passo)
+## 5. How-To — deploy e teste
 
-### 5.1 Clone do repositório
+Fluxo que o professor deve reproduzir no vídeo (clone deste repo → scripts → CRUD → `SELECT`).
+
+### 5.1 Clone deste repositório
 
 ```bash
 git clone <URL_DESTE_REPOSITORIO>
@@ -121,174 +107,108 @@ cd 2tdspw-challange-devops-sem2
 chmod +x azure_*.sh
 ```
 
-### 5.2 Build da aplicação (Veti)
+Não é necessário clonar a API Java à mão. Não publique `Dockerfile` / `docker-compose` na Azure.
 
-Não publique o `Dockerfile` / `docker-compose` na Azure (Opção B = JAR no App Service + Azure SQL). Postgres local via Compose continua válido só em desenvolvimento.
-
-```bash
-git clone https://github.com/Challenge-2025-Equipe-07/challenge-2026-java-spint1.git
-cd challenge-2026-java-spint1
-# Confirme pom.xml com mssql-jdbc e src/main/resources/application-azure.properties
-# (cópia Azure-ready local: ../challenge-2026-java-spint1-azure — faça push para o GitHub da API antes do vídeo)
-./mvnw clean package -DskipTests
-# Resultado esperado: target/veti-0.0.1-SNAPSHOT.jar
-```
-
-### 5.3 Provisionar infraestrutura + deploy
+### 5.2 Provisionar + build + deploy
 
 ```bash
-export SQL_ADMIN_PASSWORD='SuaSenhaForte!123'   # opcional; senão o script pede interativamente
+export PG_ADMIN_PASSWORD='SuaSenhaForte!123'
 ./azure_create_infra.sh
 ```
 
-O script executa, via Azure CLI:
+Passos do script: login → providers (`Microsoft.Web`, `Microsoft.DBforPostgreSQL`, `Microsoft.KeyVault`) → Resource Group → PostgreSQL + `db-challenge` + firewall → Key Vault → Plan B1 + Web App → App Settings (`DB_URL` / `DB_USER` / `DB_PASSWORD`, JWT, placeholders Google) → `git clone` + `./mvnw package` + deploy do JAR.
 
-1. Login (se necessário)
-2. Registro dos providers (`Microsoft.Web`, `Microsoft.Sql`, `Microsoft.KeyVault`)
-3. Resource Group
-4. Azure SQL Server + Database + firewall
-5. Key Vault + secrets
-6. App Service Plan + Web App + App Settings (`SPRING_PROFILES_ACTIVE=azure`, `DB_URL` / `DB_USER` / `DB_PASSWORD`)
-7. Deploy do JAR (se existir em `target/*.jar`)
+O Flexible Server pode levar vários minutos até `Ready`. O script espera esse estado antes de criar o database.
 
-Se o JAR não estiver neste repositório no momento do create:
+Logs da app:
 
 ```bash
-az webapp deploy \
-  --resource-group rg-challenge-devops \
-  --name app-ccgl-rm564113 \
-  --src-path /caminho/para/target/veti-0.0.1-SNAPSHOT.jar \
-  --type jar
+az webapp log tail -g rg-challenge-devops -n app-ccgl-rm564113
 ```
 
-Ou: `JAR_PATH=/caminho/para/target/veti-0.0.1-SNAPSHOT.jar ./azure_create_infra.sh`
-
-Logs de subida: `az webapp log tail -g rg-challenge-devops -n app-ccgl-rm564113`
-
-### 5.4 Validar infraestrutura
+### 5.3 Validar infraestrutura
 
 ```bash
 ./azure_test_infra.sh
 ```
 
-Verifica: Web App `Running`, SQL Database `Online` e health check HTTP em `/veti/health`.
+Confere Web App `Running`, PostgreSQL `Ready` e `GET /veti/tutores` em JSON. Se a página for *Hey, Java developers!*, o JAR ainda não subiu.
 
-### 5.5 Testar CRUD na nuvem (Tutor + Pet)
+### 5.4 CRUD na nuvem (Tutor + Pet)
 
-POST/PUT/DELETE exigem JWT. GET é público. Script automatizado:
+`GET` é público. `POST` / `PUT` / `DELETE` exigem JWT. O login devolve o token em texto (`eyJ...`), não `{"token":"..."}`.
 
 ```bash
-export SQL_ADMIN_PASSWORD='SuaSenhaForte!123'   # para o SELECT no final
 ./azure_test_crud.sh
 ```
 
-Fluxo manual (equivalente):
+O script **não dispara** o CRUD: imprime curls prontos para copiar e colar (URL completa, sem variáveis). Depois do login, substitua `COLE_O_JWT_AQUI` pelo JWT. Se o POST não devolver id `1`/`2`, ajuste o número no `curl`.
+
+### 5.5 Persistência no banco (vídeo)
 
 ```bash
-BASE=https://app-ccgl-rm564113.azurewebsites.net/veti
-
-curl -s "$BASE/health"
-
-curl -s -X POST "$BASE/auth/register" -H 'Content-Type: application/json' \
-  -d '{"email":"vet@ccgl.com","password":"SenhaForte!123","role":"ADMIN"}'
-
-TOKEN=$(curl -s -X POST "$BASE/auth/login" -H 'Content-Type: application/json' \
-  -d '{"email":"vet@ccgl.com","password":"SenhaForte!123"}' \
-  | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v["token"] if isinstance(v, dict) else v)')
-
-curl -s -X POST "$BASE/tutores" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"Ana Silva","email":"ana@ccgl.com","phone":"11999999999","cpf":"12345678901"}'
-curl -s -X POST "$BASE/tutores" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"Bruno Souza","email":"bruno@ccgl.com","phone":"11888888888","cpf":"98765432100"}'
-
-curl -s -X POST "$BASE/pets" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"Rex","raca":"LABRADOR_RETRIEVER","peso":28.5,"idade":4,"castrado":true,"idTutor":1}'
-curl -s -X POST "$BASE/pets" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"Mimi","raca":"PERSIAN","peso":4.2,"idade":2,"castrado":false,"idTutor":2}'
-
-curl -s "$BASE/tutores"
-curl -s -X PUT "$BASE/tutores/1" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"Ana Silva Costa","email":"ana@ccgl.com","phone":"11777777777","cpf":"12345678901"}'
-curl -s -X DELETE "$BASE/pets/2" -H "Authorization: Bearer $TOKEN"
+az postgres flexible-server execute \
+  --name pg-ccgl-rm564113 \
+  --admin-user ccgl \
+  --admin-password "$PG_ADMIN_PASSWORD" \
+  --database-name db-challenge \
+  --querytext 'SELECT * FROM "TB_TUTOR" LIMIT 10; SELECT * FROM "TB_PET" LIMIT 10;'
 ```
 
-Swagger: `https://app-ccgl-rm564113.azurewebsites.net/veti/swagger-ui.html`
+As aspas em `"TB_TUTOR"` / `"TB_PET"` são obrigatórias (Hibernate criou os nomes em maiúsculas). Cliente gráfico (DBeaver): host `pg-ccgl-rm564113.postgres.database.azure.com`, porta `5432`, database `db-challenge`, user `ccgl`, SSL `require`.
 
-### 5.6 Provar persistência no banco (obrigatório no vídeo)
-
-Não existe `az sql query`. Use `sqlcmd` (ou o Query Editor no Portal):
-
-```bash
-sqlcmd -S sql-ccgl-rm564113.database.windows.net -d db-challenge \
-  -U sqladmin -P "$SQL_ADMIN_PASSWORD" -N -C \
-  -Q "SELECT TOP 10 * FROM TB_TUTOR; SELECT TOP 10 * FROM TB_PET;"
-```
-
-### 5.7 Logs em tempo real (troubleshooting)
-
-```bash
-az webapp log tail \
-  --resource-group rg-challenge-devops \
-  --name app-ccgl-rm564113
-```
-
-### 5.8 Limpeza total
+### 5.6 Limpeza
 
 ```bash
 ./azure_delete_infra.sh
 ```
 
-Remove o Resource Group e faz purge do Key Vault (libera o nome do vault).
+Remove o Resource Group e faz **purge** do Key Vault (sem o purge, o nome `kv-ccgl-rm564113` fica preso em soft-delete). A exclusão do grupo é assíncrona: `az group show -n rg-challenge-devops`.
+
+Comandos `az` avulsos: [`guia_deploy_azure.md`](guia_deploy_azure.md).
 
 ---
 
-## 6. Scripts do repositório
+## 6. Scripts
 
-| Script | Função |
+| Arquivo | Função |
 |---|---|
-| `azure_create_infra.sh` | Cria toda a infra PaaS e faz deploy do JAR |
-| `azure_test_infra.sh` | Valida Web App, SQL e `GET /veti/health` |
-| `azure_test_crud.sh` | Register/login JWT + CRUD Tutor/Pet (≥ 2 linhas) + `sqlcmd` |
-| `azure_delete_infra.sh` | Remove Resource Group + purge do Key Vault |
-| `guia_deploy_azure.md` | Referência detalhada dos comandos `az` |
+| `azure_create_infra.sh` | Cria a PaaS, clona a API, build e deploy do JAR |
+| `azure_test_infra.sh` | Web App + PostgreSQL + `GET /veti/tutores` |
+| `azure_test_crud.sh` | Imprime curls de JWT + CRUD Tutor/Pet para copiar e colar |
+| `azure_delete_infra.sh` | Resource Group + purge do Key Vault |
+| `script_bd.sql` | DDL PostgreSQL (tabelas, colunas, PK/FK, comentários) |
+| `guia_deploy_azure.md` | Referência dos comandos `az` |
 
-Todos os recursos Azure deste Challenge são criados **apenas via Azure CLI** (nunca só pelo Portal).
-
----
-
-## 7. Desenho de arquitetura (artefato visual)
-
-O diagrama Mermaid da **seção 3** é o desenho oficial de arquitetura deste repositório (fluxos, recursos Azure e descrição técnica).
-
-Para o vídeo / PDF de entrega, exporte o diagrama (GitHub renderiza Mermaid no README) ou use o portal Azure → Resource Group `rg-challenge-devops` para evidenciar os recursos criados.
+Nenhum recurso deste Challenge é criado só pelo Portal.
 
 ---
 
-## 8. Entregáveis Sprint 3 (checklist)
+## 7. Entrega Sprint 3
 
-- [x] README com **descrição da solução** e **benefícios de negócio**
-- [x] Scripts Azure CLI de provisionamento no repositório
-- [x] How-To de deploy e teste (clone → create → test → CRUD → SELECT)
-- [x] Desenho de arquitetura (diagrama + fluxo)
-- [ ] CRUD completo na nuvem com ≥ 2 tabelas relacionadas e ≥ 2 linhas reais
-- [ ] Vídeo (≥ 720p, voz, sem legendas): scripts CLI → clone → deploy → CRUD com persistência
-- [ ] Professor com acesso admin/Basic no Azure Boards (Compliance)
-
----
-
-## 9. Links da entrega
+- [x] README com descrição da solução e benefícios de negócio
+- [x] Scripts Azure CLI no repositório
+- [x] How-To (clone → create → test → CRUD → SELECT)
+- [x] Desenho de arquitetura (diagrama + fluxo + recursos)
+- [x] DDL em `script_bd.sql` (estrutura + comentários)
+- [ ] CRUD na nuvem evidenciado no vídeo (≥ 2 tabelas relacionadas, ≥ 2 linhas)
+- [ ] Vídeo (≥ 720p, voz, sem legendas): CLI → clone deste repo → deploy → CRUD + persistência
+- [ ] Professor com acesso **Basic** e admin no Azure Boards (Compliance)
 
 | Item | Link |
 |---|---|
-| Repositório GitHub | *(colar URL)* |
+| Repositório GitHub | *(colar URL deste repositório)* |
 | Vídeo demonstrativo | *(colar URL — acesso liberado ao professor)* |
-| Azure Boards (backlog) | *(colar URL)* |
-| Aplicação em produção | https://app-ccgl-rm564113.azurewebsites.net |
+| Azure Boards | *(colar URL)* |
+| Aplicação | https://app-ccgl-rm564113.azurewebsites.net |
+| Código da API | https://github.com/Challenge-2025-Equipe-07/challenge-2026-java-spint1 |
 
 ---
 
-## 10. Segurança
+## 8. Segurança
 
-- **Não** commitar senhas, connection strings ou tokens no código.
-- Use variáveis de ambiente / Key Vault / App Settings.
-- Após o setup, restrinja a regra de firewall `AllowAllSetup` (ver `guia_deploy_azure.md`).
+- Não commitar senhas, connection strings ou JWT. Use `PG_ADMIN_PASSWORD` no ambiente.
+- O create **imprime** a URI JDBC no terminal — não cole isso no README nem no commit.
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` no App Service são placeholders para a Veti subir; login Google não faz parte do CRUD do Challenge.
+- A regra `AllowAllSetup` (0.0.0.0–255.255.255.255) existe só para setup e `SELECT` no vídeo. Depois, restrinja ao IP da máquina (ver `guia_deploy_azure.md`).
+- Após `azure_delete_infra.sh`, espere o Resource Group sumir antes de rodar o create de novo.

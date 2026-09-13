@@ -1,0 +1,4 @@
+challenge-2026-java-spint1/
+target/
+*.jar
+.DS_Store

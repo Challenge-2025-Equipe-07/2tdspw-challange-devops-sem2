@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Teste da infraestrutura — Opção B (App Service + Azure SQL PaaS)
+# Teste da infraestrutura — Opção B (App Service + PostgreSQL PaaS)
 # Time CCGL · RM564113
 # =============================================================================
 set -euo pipefail
@@ -8,21 +8,16 @@ set -euo pipefail
 RM_ID="rm564113"
 RG="rg-challenge-devops"
 WEBAPP_NAME="app-ccgl-${RM_ID}"
-SQL_SERVER_NAME="sql-ccgl-${RM_ID}"
-SQL_DB_NAME="db-challenge"
+PG_SERVER_NAME="pg-ccgl-${RM_ID}"
+PG_DB_NAME="db-challenge"
 
-APP_PORT="${APP_PORT:-8080}"
-HEALTH_PATH="${HEALTH_PATH:-/veti/health}"
-
+HEALTH_PATH="${HEALTH_PATH:-/veti/tutores}"
 WEBAPP_URL="https://${WEBAPP_NAME}.azurewebsites.net"
 
 echo "============================================="
-echo " Testando infraestrutura — Opção B"
+echo " Testando infraestrutura"
 echo "============================================="
 
-# ---------------------------------------------------------------------------
-# 1. Verificar se o Web App existe e está running
-# ---------------------------------------------------------------------------
 echo "==> [1/4] Verificando estado do Web App: $WEBAPP_NAME"
 STATE="$(az webapp show \
   --resource-group "$RG" \
@@ -31,53 +26,38 @@ STATE="$(az webapp show \
 
 if [[ "$STATE" != "Running" ]]; then
   echo "❌ Web App não está Running (estado: $STATE)"
-  echo "   Logs recentes:"
   az webapp log tail --resource-group "$RG" --name "$WEBAPP_NAME" --timeout 5 2>/dev/null || true
   exit 1
 fi
 echo "   Estado: $STATE ✅"
 
-# ---------------------------------------------------------------------------
-# 2. Verificar se o Azure SQL está acessível
-# ---------------------------------------------------------------------------
-echo "==> [2/4] Verificando Azure SQL Server: $SQL_SERVER_NAME"
-SQL_STATE="$(az sql server show \
+echo "==> [2/4] Verificando Azure PostgreSQL: $PG_SERVER_NAME"
+PG_STATE="$(az postgres flexible-server show \
   --resource-group "$RG" \
-  --name "$SQL_SERVER_NAME" \
+  --name "$PG_SERVER_NAME" \
   --query state -o tsv 2>/dev/null || echo "NOT_FOUND")"
 
-echo "   Estado SQL Server: $SQL_STATE"
+echo "   Estado servidor: $PG_STATE"
 
-DB_STATUS="$(az sql db show \
-  --resource-group "$RG" \
-  --server "$SQL_SERVER_NAME" \
-  --name "$SQL_DB_NAME" \
-  --query status -o tsv 2>/dev/null || echo "NOT_FOUND")"
-
-echo "   Estado Database:   $DB_STATUS"
-
-if [[ "$DB_STATUS" != "Online" ]]; then
-  echo "❌ Banco de dados não está Online"
+if [[ "$PG_STATE" != "Ready" ]]; then
+  echo "❌ PostgreSQL Flexible Server não está Ready"
   exit 1
 fi
-echo "   SQL Database Online ✅"
+echo "   PostgreSQL Ready ✅"
 
-# ---------------------------------------------------------------------------
-# 3. Health check HTTP
-# ---------------------------------------------------------------------------
 echo "==> [3/4] Health check: ${WEBAPP_URL}${HEALTH_PATH}"
-
 set +e
-HTTP_CODE="$(curl -s -o /dev/null -w "%{http_code}" "${WEBAPP_URL}${HEALTH_PATH}" --max-time 30)"
+HEALTH_BODY="$(curl -s -w "\n%{http_code}" "${WEBAPP_URL}${HEALTH_PATH}" --max-time 30)"
 CURL_STATUS=$?
 set -e
+HTTP_CODE="$(printf '%s' "$HEALTH_BODY" | tail -n 1)"
+HEALTH_JSON="$(printf '%s' "$HEALTH_BODY" | sed '$d')"
 
-if [[ $CURL_STATUS -ne 0 || "$HTTP_CODE" -ge 400 ]]; then
-  echo "❌ Health check falhou (HTTP $HTTP_CODE)"
-  echo ""
-  echo "   Tentando a raiz (${WEBAPP_URL}/)..."
-  ROOT_CODE="$(curl -s -o /dev/null -w "%{http_code}" "${WEBAPP_URL}/" --max-time 30 || true)"
-  echo "   HTTP raiz: $ROOT_CODE"
+if [[ $CURL_STATUS -ne 0 || "$HTTP_CODE" -ge 400 ]] \
+  || ! printf '%s' "$HEALTH_JSON" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then
+  echo "❌ Health check falhou (HTTP $HTTP_CODE) — a API Veti não respondeu JSON"
+  echo "   Corpo (primeiros 300 chars): ${HEALTH_JSON:0:300}"
+  echo "   Se aparecer a página 'Hey, Java developers!', o JAR ainda não foi publicado."
   echo ""
   echo "   Logs recentes:"
   az webapp log tail --resource-group "$RG" --name "$WEBAPP_NAME" --timeout 10 2>/dev/null || true
@@ -85,32 +65,18 @@ if [[ $CURL_STATUS -ne 0 || "$HTTP_CODE" -ge 400 ]]; then
 fi
 echo "   HTTP $HTTP_CODE ✅"
 
-# ---------------------------------------------------------------------------
-# 4. Teste rápido de endpoint (se existir /api)
-# ---------------------------------------------------------------------------
-echo "==> [4/4] Testando GET /veti/tutores"
-set +e
-BODY="$(curl -s "${WEBAPP_URL}/veti/tutores" --max-time 15)"
-set -e
+echo "==> [4/4] GET /veti/tutores"
 echo "   Resposta (primeiros 500 chars):"
-echo "   ${BODY:0:500}"
+echo "   ${HEALTH_JSON:0:500}"
 
-# ---------------------------------------------------------------------------
-# Resumo
-# ---------------------------------------------------------------------------
 echo ""
 echo "============================================="
 echo " ✅ Todos os testes passaram!"
 echo "============================================="
 echo " Web App URL:  $WEBAPP_URL"
-echo " SQL Server:   ${SQL_SERVER_NAME}.database.windows.net"
-echo " SQL Database: $SQL_DB_NAME"
+echo " PostgreSQL:   ${PG_SERVER_NAME}.postgres.database.azure.com"
+echo " Database:     $PG_DB_NAME"
+echo " API base:     ${WEBAPP_URL}/veti"
 echo ""
-echo " API base:      ${WEBAPP_URL}/veti"
-echo ""
-echo " Próximo:"
-echo "   1. ./azure_test_crud.sh"
-echo "   2. sqlcmd -S ${SQL_SERVER_NAME}.database.windows.net -d $SQL_DB_NAME \\"
-echo "        -U sqladmin -P \"\$SQL_ADMIN_PASSWORD\" -N -C \\"
-echo "        -Q \"SELECT TOP 10 * FROM TB_TUTOR; SELECT TOP 10 * FROM TB_PET;\""
+echo " Próximo: ./azure_test_crud.sh"
 echo "============================================="
