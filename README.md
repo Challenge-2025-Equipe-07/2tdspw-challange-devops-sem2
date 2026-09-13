@@ -191,37 +191,3 @@ Comandos `az` avulsos: [`guia_deploy_azure.md`](guia_deploy_azure.md).
 | `azure_test_crud.sh` | Executa CRUD HTTP (Tutor/Pet/Consulta/Veterinário) e SELECT de conferência |
 | `azure_delete_infra.sh` | Resource Group + purge do Key Vault |
 | `script_bd.sql` | DDL PostgreSQL (tabelas, colunas, PK/FK, comentários) |
-| `guia_deploy_azure.md` | Referência dos comandos `az` |
-
-Nenhum recurso deste Challenge é criado só pelo Portal.
-
----
-
-## 7. Entrega Sprint 3
-
-- [x] README com descrição da solução e benefícios de negócio
-- [x] Scripts Azure CLI no repositório
-- [x] How-To (clone → create → test → CRUD → SELECT)
-- [x] Desenho de arquitetura (diagrama + fluxo + recursos)
-- [x] DDL em `script_bd.sql` (estrutura + comentários)
-- [ ] CRUD na nuvem evidenciado no vídeo (≥ 2 tabelas relacionadas, ≥ 2 linhas)
-- [ ] Vídeo (≥ 720p, voz, sem legendas): CLI → clone deste repo → deploy → CRUD + persistência
-- [ ] Professor com acesso **Basic** e admin no Azure Boards (Compliance)
-
-| Item | Link |
-|---|---|
-| Repositório GitHub | *(colar URL deste repositório)* |
-| Vídeo demonstrativo | *(colar URL — acesso liberado ao professor)* |
-| Azure Boards | *(colar URL)* |
-| Aplicação | https://app-ccgl-rm564113.azurewebsites.net |
-| Código da API | https://github.com/Challenge-2025-Equipe-07/challenge-2026-java-spint1 |
-
----
-
-## 8. Segurança
-
-- Não commitar senhas, connection strings ou JWT. Use `PG_ADMIN_PASSWORD` no ambiente.
-- O create **imprime** a URI JDBC no terminal — não cole isso no README nem no commit.
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` no App Service são placeholders para a Veti subir; login Google não faz parte do CRUD do Challenge.
-- A regra `AllowAllSetup` (0.0.0.0–255.255.255.255) existe só para setup e `SELECT` no vídeo. Depois, restrinja ao IP da máquina (ver `guia_deploy_azure.md`).
-- Após `azure_delete_infra.sh`, espere o Resource Group sumir antes de rodar o create de novo.
