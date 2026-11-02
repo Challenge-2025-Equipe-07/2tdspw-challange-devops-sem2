@@ -1,0 +1,210 @@
+{
+  "info": {
+    "name": "Veti API — testes automatizados",
+    "description": "Cinco casos contra a API já publicada. GET /tutores, login JWT, criar tutor, alterar tutor e criar pet. Não cobre Actuator: o Java ainda não expõe /health.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://app-ccgl-rm564113.azurewebsites.net/veti" },
+    { "key": "authEmail", "value": "vet-newman@ccgl.com" },
+    { "key": "authPassword", "value": "SenhaForte!123" },
+    { "key": "token", "value": "" },
+    { "key": "tutorId", "value": "" },
+    { "key": "runId", "value": "" },
+    { "key": "cpf", "value": "" },
+    { "key": "tutorEmail", "value": "" },
+    { "key": "updatedName", "value": "Ana Silva Costa" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.collectionVariables.get('runId')) {",
+          "  const uniq = Date.now().toString();",
+          "  pm.collectionVariables.set('runId', uniq);",
+          "  pm.collectionVariables.set('cpf', ('1' + uniq).slice(-11));",
+          "  pm.collectionVariables.set('tutorEmail', 'ana' + uniq + '@ccgl.com');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "GET /tutores",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/tutores"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('GET /tutores retorna 200 em JSON', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.response.to.be.json;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /auth/register",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{authEmail}}\",\n  \"password\": \"{{authPassword}}\",\n  \"role\": \"ADMIN\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/register"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Register responde 200 (novo) ou 400 (já existe)', function () {",
+              "  pm.expect([200, 400]).to.include(pm.response.code);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /auth/login",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{authEmail}}\",\n  \"password\": \"{{authPassword}}\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test('Login devolve JWT', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(body.token).to.match(/^eyJ/);",
+              "});",
+              "pm.collectionVariables.set('token', body.token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /tutores",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Ana Silva\",\n  \"email\": \"{{tutorEmail}}\",\n  \"phone\": \"11999999999\",\n  \"cpf\": \"{{cpf}}\"\n}"
+        },
+        "url": "{{baseUrl}}/tutores"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const tutor = pm.response.json();",
+              "pm.test('POST /tutores cria tutor com id', function () {",
+              "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+              "  pm.expect(tutor.id).to.be.a('number');",
+              "  pm.expect(tutor.email).to.eql(pm.collectionVariables.get('tutorEmail'));",
+              "});",
+              "pm.collectionVariables.set('tutorId', String(tutor.id));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "PUT /tutores/{{tutorId}}",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"{{updatedName}}\",\n  \"email\": \"{{tutorEmail}}\",\n  \"phone\": \"11777777777\",\n  \"cpf\": \"{{cpf}}\"\n}"
+        },
+        "url": "{{baseUrl}}/tutores/{{tutorId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const tutor = pm.response.json();",
+              "pm.test('PUT /tutores altera o nome', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(tutor.name).to.eql(pm.collectionVariables.get('updatedName'));",
+              "  pm.expect(tutor.phone).to.eql('11777777777');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /pets",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Rex\",\n  \"raca\": \"LABRADOR_RETRIEVER\",\n  \"peso\": 28.5,\n  \"idade\": 4,\n  \"castrado\": true,\n  \"idTutor\": {{tutorId}}\n}"
+        },
+        "url": "{{baseUrl}}/pets"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const pet = pm.response.json();",
+              "pm.test('POST /pets cria pet ligado ao tutor', function () {",
+              "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+              "  pm.expect(pet.id).to.be.a('number');",
+              "  pm.expect(pet.idTutor).to.eql(Number(pm.collectionVariables.get('tutorId')));",
+              "  pm.expect(pet.nome).to.eql('Rex');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

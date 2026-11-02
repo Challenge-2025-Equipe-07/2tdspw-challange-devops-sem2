@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Deletar toda a infraestrutura — Opção B (App Service + PostgreSQL PaaS)
+# Deletar toda a infraestrutura — Opção 2 (App Service + PostgreSQL PaaS)
 # Time CCGL · RM564113
 # =============================================================================
 set -euo pipefail
@@ -19,6 +19,8 @@ echo " Isso vai remover:"
 echo "   - Web App (App Service)"
 echo "   - App Service Plan"
 echo "   - Azure Database for PostgreSQL Flexible Server"
+echo "   - Application Insights"
+echo "   - Log Analytics"
 echo "   - Key Vault"
 echo "   - Todos os recursos do grupo"
 echo ""

@@ -1,0 +1,139 @@
+# Referência local. Não registrar este arquivo no Azure DevOps.
+# A pipeline avaliada é a da API, na main:
+# https://github.com/Challenge-2025-Equipe-07/challenge-2026-java-spint1/blob/main/azure-pipelines.yml
+# Este YAML clona esse repositório e publicaria o mesmo App Service uma segunda vez.
+#
+# Service connection ARM esperada no Azure DevOps: azure-rm-challenge
+# (Workload identity / Azure Resource Manager). O nome abaixo tem de ser o mesmo.
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  azureSubscription: 'azure-rm-challenge'
+  resourceGroup: 'rg-challenge-devops'
+  webAppName: 'app-ccgl-rm564113'
+  javaRepoUrl: 'https://github.com/Challenge-2025-Equipe-07/challenge-2026-java-spint1.git'
+
+stages:
+  - stage: Build
+    displayName: 'Stage 1: Build & Test (CI)'
+    jobs:
+      - job: BuildJob
+        pool:
+          vmImage: 'ubuntu-latest'
+        services:
+          postgres:
+            image: postgres:16
+            ports:
+              - 5432:5432
+            env:
+              POSTGRES_USER: ccgl
+              POSTGRES_PASSWORD: secret
+              POSTGRES_DB: veti-db
+            options: >-
+              --health-cmd pg_isready
+              --health-interval 10s
+              --health-timeout 5s
+              --health-retries 5
+        steps:
+          - checkout: self
+
+          - task: JavaToolInstaller@0
+            displayName: 'Selecionar Java 21'
+            inputs:
+              versionSpec: '21'
+              jdkArchitectureOption: 'x64'
+              jdkSourceOption: 'PreInstalled'
+
+          - script: |
+              set -euo pipefail
+              git clone --depth 1 "$(javaRepoUrl)" java-app
+            displayName: 'Clonar repositório Java'
+
+          - script: |
+              set -euo pipefail
+              chmod +x mvnw
+              ./mvnw -B test
+            workingDirectory: java-app
+            displayName: 'Executar testes unitários (mvn test)'
+            env:
+              DB_URL: jdbc:postgresql://localhost:5432/veti-db
+              DB_USER: ccgl
+              DB_PASSWORD: secret
+              JWT_SECRET: veti-default-secret-change-in-production
+              GOOGLE_CLIENT_ID: disabled-placeholder
+              GOOGLE_CLIENT_SECRET: disabled-placeholder
+
+          - script: |
+              set -euo pipefail
+              ./mvnw -B package -DskipTests
+            workingDirectory: java-app
+            displayName: 'Empacotar JAR'
+            env:
+              DB_URL: jdbc:postgresql://localhost:5432/veti-db
+              DB_USER: ccgl
+              DB_PASSWORD: secret
+              JWT_SECRET: veti-default-secret-change-in-production
+              GOOGLE_CLIENT_ID: disabled-placeholder
+              GOOGLE_CLIENT_SECRET: disabled-placeholder
+
+          - script: |
+              set -euo pipefail
+              mkdir -p "$(Build.ArtifactStagingDirectory)"
+              jar=`find java-app/target -maxdepth 1 -name 'veti-*.jar' ! -name '*.original' | head -n 1`
+              if [ -z "$jar" ]; then
+                echo "JAR não gerado em java-app/target" >&2
+                exit 1
+              fi
+              cp "$jar" "$(Build.ArtifactStagingDirectory)/"
+            displayName: 'Preparar artefato JAR'
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publicar artefato'
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+              ArtifactName: 'drop'
+
+  - stage: Deploy
+    displayName: 'Stage 2: Deploy no Azure (CD)'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployJob
+        environment: 'Production'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: drop
+
+                - task: AzureCLI@2
+                  displayName: 'Implantar JAR no App Service (ARM)'
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      set -euo pipefail
+                      jar=`find "$PIPELINE_WORKSPACE/drop" -maxdepth 1 -name 'veti-*.jar' ! -name '*.original' | head -n 1`
+                      if [ -z "$jar" ]; then
+                        echo "JAR não encontrado no artefato drop" >&2
+                        exit 1
+                      fi
+                      echo "App Settings de banco, JWT e Application Insights já foram aplicados por azure_create_infra.sh."
+                      az webapp deploy \
+                        --resource-group "$(resourceGroup)" \
+                        --name "$(webAppName)" \
+                        --src-path "$jar" \
+                        --type jar

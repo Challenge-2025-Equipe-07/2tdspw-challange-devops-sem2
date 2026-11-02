@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Opção B — App Service (Web App) + Azure Database for PostgreSQL (PaaS)
+# Opção 2 — App Service (Web App) + Azure Database for PostgreSQL (PaaS)
 # Time CCGL · RM564113 · Região chilecentral
 # =============================================================================
 set -euo pipefail
@@ -18,6 +18,8 @@ PG_ADMIN_USER="ccgl"
 PG_ADMIN_PASSWORD="${PG_ADMIN_PASSWORD:-${SQL_ADMIN_PASSWORD:-}}"
 
 KEYVAULT_NAME="kv-ccgl-${RM_ID}"
+LAW_NAME="law-ccgl-${RM_ID}"
+APPINSIGHTS_NAME="appi-ccgl-${RM_ID}"
 
 APP_SERVICE_PLAN="plan-ccgl-${RM_ID}"
 WEBAPP_NAME="app-ccgl-${RM_ID}"
@@ -48,7 +50,7 @@ require_cmd git
 
 wait_pg_ready() {
   local reason="${1:-}"
-  [[ -n "$reason" ]] && echo "==> [4/8] Aguardando PostgreSQL Ready ($reason)"
+  [[ -n "$reason" ]] && echo "==> [4/9] Aguardando PostgreSQL Ready ($reason)"
   local state=""
   local i
   for i in $(seq 1 60); do
@@ -92,14 +94,14 @@ az_pg_retry() {
 }
 
 echo "============================================="
-echo " Opção B: App Service + PostgreSQL Flexible Server (PaaS)"
+echo " Opção 2: App Service + PostgreSQL Flexible Server (PaaS)"
 echo " Time CCGL · RM564113 · chilecentral"
 echo "============================================="
 
 # ---------------------------------------------------------------------------
 # 1. Login
 # ---------------------------------------------------------------------------
-echo "==> [1/8] Login no Azure"
+echo "==> [1/9] Login no Azure"
 if ! az account show >/dev/null 2>&1; then
   az login
 fi
@@ -107,21 +109,23 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Registrar providers
 # ---------------------------------------------------------------------------
-echo "==> [2/8] Registrando provedores de recursos"
-az provider register --namespace Microsoft.Web                >/dev/null
-az provider register --namespace Microsoft.DBforPostgreSQL    >/dev/null
-az provider register --namespace Microsoft.KeyVault           >/dev/null
+echo "==> [2/9] Registrando provedores de recursos"
+az provider register --namespace Microsoft.Web                 >/dev/null
+az provider register --namespace Microsoft.DBforPostgreSQL     >/dev/null
+az provider register --namespace Microsoft.KeyVault            >/dev/null
+az provider register --namespace Microsoft.Insights            >/dev/null
+az provider register --namespace Microsoft.OperationalInsights >/dev/null
 
 # ---------------------------------------------------------------------------
 # 3. Resource Group
 # ---------------------------------------------------------------------------
-echo "==> [3/8] Criando Resource Group: $RG ($LOCATION)"
+echo "==> [3/9] Criando Resource Group: $RG ($LOCATION)"
 az group create --name "$RG" --location "$LOCATION" >/dev/null
 
 # ---------------------------------------------------------------------------
 # 4. Azure Database for PostgreSQL Flexible Server (PaaS)
 # ---------------------------------------------------------------------------
-echo "==> [4/8] Criando PostgreSQL Flexible Server: $PG_SERVER_NAME (Burstable B1ms)"
+echo "==> [4/9] Criando PostgreSQL Flexible Server: $PG_SERVER_NAME (Burstable B1ms)"
 if az postgres flexible-server show --resource-group "$RG" --name "$PG_SERVER_NAME" >/dev/null 2>&1; then
   echo "    Servidor já existe — reutilizando"
 else
@@ -151,7 +155,7 @@ fi
 
 wait_pg_ready "após create"
 
-echo "==> [4/8] Garantindo database: $PG_DB_NAME"
+echo "==> [4/9] Garantindo database: $PG_DB_NAME"
 if az postgres flexible-server db show \
      --resource-group "$RG" \
      --server-name "$PG_SERVER_NAME" \
@@ -164,28 +168,34 @@ else
     --database-name "$PG_DB_NAME" >/dev/null
 fi
 
-echo "==> [4/8] Liberando acesso temporário (todos os IPs) para setup"
-az_pg_retry az postgres flexible-server firewall-rule create \
-  --resource-group "$RG" \
-  --name "$PG_SERVER_NAME" \
-  --rule-name AllowAllSetup \
-  --start-ip-address 0.0.0.0 \
-  --end-ip-address 255.255.255.255 >/dev/null 2>&1 || true
+ensure_firewall() {
+  local rule_name="$1"
+  local start_ip="$2"
+  local end_ip="$3"
+  if az postgres flexible-server firewall-rule show \
+       --resource-group "$RG" \
+       --name "$PG_SERVER_NAME" \
+       --rule-name "$rule_name" >/dev/null 2>&1; then
+    echo "    Firewall ${rule_name} já existe"
+    return 0
+  fi
+  az_pg_retry az postgres flexible-server firewall-rule create \
+    --resource-group "$RG" \
+    --name "$PG_SERVER_NAME" \
+    --rule-name "$rule_name" \
+    --start-ip-address "$start_ip" \
+    --end-ip-address "$end_ip" >/dev/null
+}
 
-echo "==> [4/8] Liberando serviços Azure (App Service → PostgreSQL)"
-az_pg_retry az postgres flexible-server firewall-rule create \
-  --resource-group "$RG" \
-  --name "$PG_SERVER_NAME" \
-  --rule-name AllowAzureServices \
-  --start-ip-address 0.0.0.0 \
-  --end-ip-address 0.0.0.0 >/dev/null 2>&1 || true
+echo "==> [4/9] Liberando serviços Azure (App Service → PostgreSQL)"
+ensure_firewall AllowAzureServices 0.0.0.0 0.0.0.0
 
 PG_JDBC_URL="jdbc:postgresql://${PG_SERVER_NAME}.postgres.database.azure.com:5432/${PG_DB_NAME}?sslmode=require"
 
 # ---------------------------------------------------------------------------
 # 5. Key Vault — guardar segredos
 # ---------------------------------------------------------------------------
-echo "==> [5/8] Criando/atualizando Key Vault: $KEYVAULT_NAME"
+echo "==> [5/9] Criando/atualizando Key Vault: $KEYVAULT_NAME"
 if az keyvault show --name "$KEYVAULT_NAME" --resource-group "$RG" >/dev/null 2>&1; then
   echo "    Key Vault já existe — atualizando"
   az keyvault update \
@@ -214,13 +224,13 @@ if [[ -z "$CURRENT_OID" ]]; then
   exit 1
 fi
 
-echo "==> [5/8] Concedendo permissão de secrets ao usuário atual"
+echo "==> [5/9] Concedendo permissão de secrets ao usuário atual"
 az keyvault set-policy \
   --name "$KEYVAULT_NAME" \
   --object-id "$CURRENT_OID" \
   --secret-permissions get list set delete >/dev/null
 
-echo "==> [5/8] Salvando segredos no Key Vault"
+echo "==> [5/9] Salvando segredos no Key Vault"
 az keyvault secret set --vault-name "$KEYVAULT_NAME" --name "pg-jdbc-url"  --value "$PG_JDBC_URL"        >/dev/null
 az keyvault secret set --vault-name "$KEYVAULT_NAME" --name "pg-username"  --value "$PG_ADMIN_USER"      >/dev/null
 az keyvault secret set --vault-name "$KEYVAULT_NAME" --name "pg-password"  --value "$PG_ADMIN_PASSWORD"  >/dev/null
@@ -229,28 +239,114 @@ az keyvault secret set --vault-name "$KEYVAULT_NAME" --name "jwt-secret"   --val
 # ---------------------------------------------------------------------------
 # 6. App Service Plan
 # ---------------------------------------------------------------------------
-echo "==> [6/8] Criando App Service Plan: $APP_SERVICE_PLAN (B1 — Linux)"
-az appservice plan create \
-  --name "$APP_SERVICE_PLAN" \
-  --resource-group "$RG" \
-  --location "$LOCATION" \
-  --sku B1 \
-  --is-linux >/dev/null
+echo "==> [6/9] Criando App Service Plan: $APP_SERVICE_PLAN (B1 — Linux)"
+if az appservice plan show --resource-group "$RG" --name "$APP_SERVICE_PLAN" >/dev/null 2>&1; then
+  echo "    Plan já existe — reutilizando"
+else
+  az appservice plan create \
+    --name "$APP_SERVICE_PLAN" \
+    --resource-group "$RG" \
+    --location "$LOCATION" \
+    --sku B1 \
+    --is-linux >/dev/null
+fi
 
 # ---------------------------------------------------------------------------
 # 7. Web App (Java 21)
 # ---------------------------------------------------------------------------
-echo "==> [7/8] Criando Web App: $WEBAPP_NAME"
-az webapp create \
-  --name "$WEBAPP_NAME" \
+echo "==> [7/9] Criando Web App: $WEBAPP_NAME"
+if az webapp show --resource-group "$RG" --name "$WEBAPP_NAME" >/dev/null 2>&1; then
+  echo "    Web App já existe — reutilizando"
+else
+  az webapp create \
+    --name "$WEBAPP_NAME" \
+    --resource-group "$RG" \
+    --plan "$APP_SERVICE_PLAN" \
+    --runtime "JAVA:21-java21" >/dev/null
+fi
+
+# ---------------------------------------------------------------------------
+# 8. Log Analytics + Application Insights + diagnostic settings
+# O agente Java 3.x do App Service Linux é anexado pela plataforma quando
+# APPLICATIONINSIGHTS_CONNECTION_STRING e ApplicationInsightsAgent_EXTENSION_VERSION=~3
+# estão definidos. A plataforma injeta JAVA_TOOL_OPTIONS. Não definimos esse
+# valor aqui para não apontar para um JAR que o runtime ainda não baixou.
+# Não configuramos healthCheckPath: a API ainda não expõe /health.
+# ---------------------------------------------------------------------------
+echo "==> [8/9] Criando Log Analytics: $LAW_NAME"
+OBS_LOCATION="$LOCATION"
+if az monitor log-analytics workspace show \
+     --resource-group "$RG" \
+     --workspace-name "$LAW_NAME" >/dev/null 2>&1; then
+  echo "    Workspace já existe — reutilizando"
+  OBS_LOCATION="$(az monitor log-analytics workspace show \
+    --resource-group "$RG" \
+    --workspace-name "$LAW_NAME" \
+    --query location -o tsv)"
+else
+  set +e
+  LAW_OUT="$(az monitor log-analytics workspace create \
+    --resource-group "$RG" \
+    --workspace-name "$LAW_NAME" \
+    --location "$OBS_LOCATION" 2>&1)"
+  LAW_RC=$?
+  set -e
+  if [[ $LAW_RC -ne 0 ]]; then
+    if az monitor log-analytics workspace show \
+         --resource-group "$RG" \
+         --workspace-name "$LAW_NAME" >/dev/null 2>&1; then
+      echo "    Create retornou erro, mas o workspace existe — continuando"
+    else
+      echo "    ${OBS_LOCATION} recusou o Log Analytics — tentando eastus2"
+      printf '%s\n' "$LAW_OUT" >&2
+      OBS_LOCATION="eastus2"
+      az monitor log-analytics workspace create \
+        --resource-group "$RG" \
+        --workspace-name "$LAW_NAME" \
+        --location "$OBS_LOCATION" >/dev/null
+    fi
+  fi
+fi
+
+LAW_ID="$(az monitor log-analytics workspace show \
   --resource-group "$RG" \
-  --plan "$APP_SERVICE_PLAN" \
-  --runtime "JAVA:21-java21" >/dev/null
+  --workspace-name "$LAW_NAME" \
+  --query id -o tsv)"
+
+echo "==> [8/9] Criando Application Insights: $APPINSIGHTS_NAME ($OBS_LOCATION)"
+if az monitor app-insights component show \
+     --app "$APPINSIGHTS_NAME" \
+     --resource-group "$RG" >/dev/null 2>&1; then
+  echo "    Application Insights já existe — reutilizando"
+else
+  az monitor app-insights component create \
+    --app "$APPINSIGHTS_NAME" \
+    --location "$OBS_LOCATION" \
+    --resource-group "$RG" \
+    --workspace "$LAW_ID" \
+    --kind web \
+    --application-type web >/dev/null
+fi
+
+APPINSIGHTS_CS="$(az monitor app-insights component show \
+  --app "$APPINSIGHTS_NAME" \
+  --resource-group "$RG" \
+  --query connectionString -o tsv)"
+if [[ -z "$APPINSIGHTS_CS" ]]; then
+  echo "❌ Connection string do Application Insights vazia" >&2
+  exit 1
+fi
+
+echo "==> [8/9] Salvando connection string no Key Vault"
+az keyvault secret set \
+  --vault-name "$KEYVAULT_NAME" \
+  --name "appinsights-connection-string" \
+  --value "$APPINSIGHTS_CS" >/dev/null
 
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-disabled-placeholder}"
 GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-disabled-placeholder}"
 
-echo "==> [7/8] Configurando App Settings (DB_URL/DB_USER/DB_PASSWORD da API Veti)"
+echo "==> [8/9] Configurando App Settings (banco, JWT e Application Insights)"
 az webapp config appsettings set \
   --resource-group "$RG" \
   --name "$WEBAPP_NAME" \
@@ -267,10 +363,62 @@ az webapp config appsettings set \
     JWT_SECRET="$JWT_SECRET" \
     GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
     GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
-    WEBSITES_PORT="$APP_PORT" >/dev/null
+    WEBSITES_PORT="$APP_PORT" \
+    APPLICATIONINSIGHTS_CONNECTION_STRING="$APPINSIGHTS_CS" \
+    ApplicationInsightsAgent_EXTENSION_VERSION="~3" >/dev/null
+
+echo "==> [8/9] Habilitando log de aplicação e de container"
+set +e
+LOG_OUT="$(az webapp log config \
+  --resource-group "$RG" \
+  --name "$WEBAPP_NAME" \
+  --application-logging filesystem \
+  --level information \
+  --docker-container-logging filesystem 2>&1)"
+LOG_RC=$?
+set -e
+if [[ $LOG_RC -ne 0 ]]; then
+  echo "    Log em filesystem recusado no Linux — habilitando o log do container"
+  printf '%s\n' "$LOG_OUT" >&2
+  az webapp log config \
+    --resource-group "$RG" \
+    --name "$WEBAPP_NAME" \
+    --docker-container-logging filesystem >/dev/null
+fi
+
+WEBAPP_ID="$(az webapp show --resource-group "$RG" --name "$WEBAPP_NAME" --query id -o tsv)"
+
+apply_diag() {
+  local logs_json="$1"
+  az monitor diagnostic-settings create \
+    --name diag-webapp \
+    --resource "$WEBAPP_ID" \
+    --workspace "$LAW_ID" \
+    --logs "$logs_json" \
+    --metrics '[{"category":"AllMetrics","enabled":true}]'
+}
+
+remove_diag() {
+  az monitor diagnostic-settings delete \
+    --name diag-webapp \
+    --resource "$WEBAPP_ID" >/dev/null 2>&1 || true
+}
+
+echo "==> [8/9] Diagnostic settings do Web App → Log Analytics"
+remove_diag
+set +e
+DIAG_OUT="$(apply_diag '[{"category":"AppServiceHTTPLogs","enabled":true},{"category":"AppServiceConsoleLogs","enabled":true},{"category":"AppServiceAppLogs","enabled":true}]' 2>&1)"
+DIAG_RC=$?
+set -e
+if [[ $DIAG_RC -ne 0 ]]; then
+  echo "    Categorias explícitas recusadas — usando allLogs"
+  printf '%s\n' "$DIAG_OUT" >&2
+  remove_diag
+  apply_diag '[{"categoryGroup":"allLogs","enabled":true}]' >/dev/null
+fi
 
 # ---------------------------------------------------------------------------
-# 8. Clone da API Java, build e deploy do JAR
+# 9. Clone da API Java, build e deploy do JAR
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JAVA_DIR="${SCRIPT_DIR}/${JAVA_DIR_NAME}"
@@ -299,19 +447,30 @@ pick_java21() {
   exit 1
 }
 
-echo "==> [8/8] Clone + build + deploy da API Veti"
+echo "==> [9/9] Clone + build + deploy da API Veti"
 if [[ ! -d "${JAVA_DIR}/.git" ]]; then
-  echo "    git clone ${JAVA_REPO_URL}"
-  git clone --depth 1 "$JAVA_REPO_URL" "$JAVA_DIR"
+  echo "    git clone --branch main ${JAVA_REPO_URL}"
+  git clone --depth 1 --branch main "$JAVA_REPO_URL" "$JAVA_DIR"
 else
   echo "    Repositório já existe em ${JAVA_DIR_NAME}/ — atualizando"
   git -C "$JAVA_DIR" pull --ff-only || true
 fi
 
 chmod +x "${JAVA_DIR}/mvnw"
+WRAPPER_PROPS="${JAVA_DIR}/.mvn/wrapper/maven-wrapper.properties"
+if [[ ! -f "$WRAPPER_PROPS" ]]; then
+  echo "    Maven Wrapper ausente no repositório — recriando maven-wrapper.properties"
+  mkdir -p "${JAVA_DIR}/.mvn/wrapper"
+  cat > "$WRAPPER_PROPS" <<'EOF'
+wrapperVersion=3.3.4
+distributionType=only-script
+distributionUrl=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.15/apache-maven-3.9.15-bin.zip
+EOF
+fi
 pick_java21
 echo "    JAVA_HOME=${JAVA_HOME:-}"
 echo "    ./mvnw clean package -DskipTests"
+echo "    (mvn test deste Java ainda não compila; a pipeline não deve ser ligada até passar)"
 ( cd "$JAVA_DIR" && ./mvnw clean package -DskipTests )
 
 JAR_FILE="${JAVA_DIR}/target/veti-0.0.1-SNAPSHOT.jar"
@@ -353,9 +512,12 @@ echo " Resource Group:  $RG"
 echo " PostgreSQL:      $PG_HOST"
 echo " Database:        $PG_DB_NAME"
 echo " Key Vault:       $KEYVAULT_NAME"
+echo " Log Analytics:   $LAW_NAME ($OBS_LOCATION)"
+echo " App Insights:    $APPINSIGHTS_NAME"
 echo " App Service:     $WEBAPP_NAME"
 echo " URL da App:      $WEBAPP_URL"
 echo " API base:        ${WEBAPP_URL}/veti"
+echo " Probe atual:     GET /veti/tutores"
 echo ""
 echo " Beekeeper URL:   $PG_URI"
 echo " JDBC (app only): $PG_JDBC_URL"
@@ -364,4 +526,5 @@ echo "                  SSL = Trust the server (não verifique o certificado)"
 echo ""
 echo " Próximo passo:   ./azure_test_infra.sh"
 echo "                  ./azure_test_crud.sh   # CRUD HTTP + SELECT no banco"
+echo "                  ./tests/run_newman.sh  # 5 casos Postman/Newman"
 echo "============================================="
