@@ -271,7 +271,7 @@ fi
 # APPLICATIONINSIGHTS_CONNECTION_STRING e ApplicationInsightsAgent_EXTENSION_VERSION=~3
 # estão definidos. A plataforma injeta JAVA_TOOL_OPTIONS. Não definimos esse
 # valor aqui para não apontar para um JAR que o runtime ainda não baixou.
-# Não configuramos healthCheckPath: a API ainda não expõe /health.
+# healthCheckPath=/health é aplicado depois do deploy do JAR.
 # ---------------------------------------------------------------------------
 echo "==> [8/9] Criando Log Analytics: $LAW_NAME"
 OBS_LOCATION="$LOCATION"
@@ -421,7 +421,12 @@ fi
 # 9. Clone da API Java, build e deploy do JAR
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-JAVA_DIR="${SCRIPT_DIR}/${JAVA_DIR_NAME}"
+# No repositório da API o mvnw está ao lado do script. Neste repositório de infra, o fonte fica na pasta clonada.
+if [[ -x "${SCRIPT_DIR}/mvnw" ]]; then
+  JAVA_DIR="$SCRIPT_DIR"
+else
+  JAVA_DIR="${SCRIPT_DIR}/${JAVA_DIR_NAME}"
+fi
 
 pick_java21() {
   if [[ -n "${JAVA_HOME:-}" && -x "${JAVA_HOME}/bin/java" ]] \
@@ -448,12 +453,17 @@ pick_java21() {
 }
 
 echo "==> [9/9] Clone + build + deploy da API Veti"
-if [[ ! -d "${JAVA_DIR}/.git" ]]; then
-  echo "    git clone --branch main ${JAVA_REPO_URL}"
-  git clone --depth 1 --branch main "$JAVA_REPO_URL" "$JAVA_DIR"
-else
+if [[ -d "${JAVA_DIR}/.git" ]]; then
   echo "    Repositório já existe em ${JAVA_DIR_NAME}/ — atualizando"
   git -C "$JAVA_DIR" pull --ff-only || true
+elif [[ -x "${JAVA_DIR}/mvnw" ]]; then
+  echo "    Fonte já presente em ${JAVA_DIR_NAME}/ — usando esta cópia"
+elif [[ -e "$JAVA_DIR" ]]; then
+  echo "❌ ${JAVA_DIR_NAME}/ existe, mas não é um clone git nem tem mvnw" >&2
+  exit 1
+else
+  echo "    git clone --branch main ${JAVA_REPO_URL}"
+  git clone --depth 1 --branch main "$JAVA_REPO_URL" "$JAVA_DIR"
 fi
 
 chmod +x "${JAVA_DIR}/mvnw"
@@ -470,7 +480,7 @@ fi
 pick_java21
 echo "    JAVA_HOME=${JAVA_HOME:-}"
 echo "    ./mvnw clean package -DskipTests"
-echo "    (mvn test deste Java ainda não compila; a pipeline não deve ser ligada até passar)"
+echo "    (os testes rodam na pipeline do repositório Java; o deploy só publica o JAR)"
 ( cd "$JAVA_DIR" && ./mvnw clean package -DskipTests )
 
 JAR_FILE="${JAVA_DIR}/target/veti-0.0.1-SNAPSHOT.jar"
@@ -492,6 +502,12 @@ az webapp deploy \
   --src-path "$JAR_FILE" \
   --type jar >/dev/null
 echo "    Deploy concluído!"
+
+echo "    healthCheckPath=/health"
+az webapp config set \
+  --resource-group "$RG" \
+  --name "$WEBAPP_NAME" \
+  --generic-configurations '{"healthCheckPath": "/health"}' >/dev/null
 
 # ---------------------------------------------------------------------------
 # Resumo
@@ -517,7 +533,7 @@ echo " App Insights:    $APPINSIGHTS_NAME"
 echo " App Service:     $WEBAPP_NAME"
 echo " URL da App:      $WEBAPP_URL"
 echo " API base:        ${WEBAPP_URL}/veti"
-echo " Probe atual:     GET /veti/tutores"
+echo " Probe atual:     GET /health"
 echo ""
 echo " Beekeeper URL:   $PG_URI"
 echo " JDBC (app only): $PG_JDBC_URL"

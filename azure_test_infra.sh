@@ -13,10 +13,8 @@ PG_DB_NAME="db-challenge"
 LAW_NAME="law-ccgl-${RM_ID}"
 APPINSIGHTS_NAME="appi-ccgl-${RM_ID}"
 
-# Probe atual: a API Java ainda não expõe Actuator.
-# Quando /veti/actuator/health existir:
-#   HEALTH_PATH=/veti/actuator/health ./azure_test_infra.sh
-HEALTH_PATH="${HEALTH_PATH:-/veti/tutores}"
+# GET /health é o alias do Actuator (API + PostgreSQL + dependência).
+HEALTH_PATH="${HEALTH_PATH:-/health}"
 WEBAPP_URL="https://${WEBAPP_NAME}.azurewebsites.net"
 
 app_setting() {
@@ -106,8 +104,8 @@ HTTP_CODE="$(printf '%s' "$HEALTH_BODY" | tail -n 1)"
 HEALTH_JSON="$(printf '%s' "$HEALTH_BODY" | sed '$d')"
 
 if [[ $CURL_STATUS -ne 0 || "$HTTP_CODE" -ge 400 ]] \
-  || ! printf '%s' "$HEALTH_JSON" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then
-  echo "❌ Health check falhou (HTTP $HTTP_CODE) — a API Veti não respondeu JSON"
+  || ! printf '%s' "$HEALTH_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("status")=="UP"' 2>/dev/null; then
+  echo "❌ Health check falhou (HTTP $HTTP_CODE) — ${HEALTH_PATH} não retornou status UP"
   echo "   Corpo (primeiros 300 chars): ${HEALTH_JSON:0:300}"
   echo "   Se aparecer a página 'Hey, Java developers!', o JAR ainda não foi publicado."
   echo ""

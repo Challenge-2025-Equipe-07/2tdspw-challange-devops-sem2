@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Veti API — testes automatizados",
-    "description": "Cinco casos contra a API já publicada. GET /tutores, login JWT, criar tutor, alterar tutor e criar pet. Não cobre Actuator: o Java ainda não expõe /health.",
+    "description": "Cinco casos contra a API já publicada: GET /tutores, login JWT, criar tutor, alterar tutor e criar pet. O health check fica em GET /health, coberto por azure_test_infra.sh.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
